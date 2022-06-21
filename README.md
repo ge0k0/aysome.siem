@@ -1,1 +1,3 @@
-# aysome.siem
+# AYSOME SIEM Solution
+
+AYSOME SIEM Solution is an Open Source Project which is aimed to provide a comprehensive security information and event management (SIEM) solution for any type of network environments. The target group for the project are companies with a need to secure the network environment and a lower budget. The business model of the project is free to use for everybody with paid extensions.
