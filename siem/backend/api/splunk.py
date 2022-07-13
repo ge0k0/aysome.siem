@@ -1,12 +1,13 @@
-from api_methods import API_Methods
-from api_settings import *
+from re import A
+from backend.api.api_methods import API_Methods
+from backend.api.api_settings import *
 import splunklib.client as client
 import splunklib.results as results
+import json
 
-class Splunk_API(API_Methods):
+class API(API_Methods):
     def __init__(self):
         super().__init__()
-        pass
 
     def login(self):
         self.service = client.connect(
@@ -27,16 +28,31 @@ class Splunk_API(API_Methods):
         return self.search_results
 
     def results(self, print_results=False):
-        self.results_json = results.JSONResultsReader(self.search_results)
+        if self.search_results.empty:
+            self.results_number_of_results = 0
+            self.results_dict_list = []
+        else:
+            byteObj = self.search_results.readall()
+            utf_string = byteObj.decode('utf-8')
+            self.results_raw = json.loads(utf_string)
+            self.results_dict_list = self.results_raw['results']
+            
+            self.results_fields_list = []
+            for field in self.results_raw['fields']:
+                self.results_fields_list.append(field['name'])
 
-        if print_results == True:
-            for item in self.results_json:
-                print(item)
-        return self.results_json
+            self.results_preview = self.results_raw['preview']
+            self.results_messages = self.results_raw['messages']
+            self.results_number_of_results = len(self.results_raw['results'])
+            
+            if print_results == True:
+                for item in self.results_dict_list:
+                    print(item)
+        return self.results_dict_list
 
 
 if __name__ == "__main__":
-    service=Splunk_API()
+    service=API()
     service.login()
     service.search("index=* qid=n38H08hb016055")
     service.results(print_results=True)

@@ -20,3 +20,4 @@ class Correlation(models.Model):
 
 class Alert(models.Model):
     title = models.CharField(max_length=256)
+    raw_event = models.TextField()
