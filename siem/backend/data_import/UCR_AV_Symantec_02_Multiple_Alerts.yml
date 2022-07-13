@@ -1,0 +1,12 @@
+# Hello World!
+
+title: AV_Symantec_01_Single_Alert
+description: Antivirus Alert from Symantec
+author: AYSOME IT Security
+groups: 
+  - AV
+search_query: None
+search_terms: 
+  - one
+  - two
+  - three
