@@ -1,4 +1,8 @@
-from re import A
+if __name__ == "__main__":
+    import os
+    import sys
+    sys.path.append(os.getcwd())
+
 from backend.api.api_methods import API_Methods
 from backend.api.api_settings import *
 import splunklib.client as client
@@ -28,6 +32,7 @@ class API(API_Methods):
         return self.search_results
 
     def results(self, print_results=False):
+        print(self.search_results.empty)
         if self.search_results.empty:
             self.results_number_of_results = 0
             self.results_dict_list = []
@@ -50,9 +55,17 @@ class API(API_Methods):
                     print(item)
         return self.results_dict_list
 
+    def write_results(self, index=SPLUNK_RESULTS_INDEX, sourcetype=SPLUNK_RESULTS_SOURCETYPE, source="API", host="local", Event=""):
+        if Event == "":
+            pass
+        else:
+            Event = bytes(Event, 'utf-8')
+            connection_index = self.service.indexes[index]
+            connection_index.submit(Event, sourcetype=sourcetype, host=host, source=source)
 
 if __name__ == "__main__":
     service=API()
     service.login()
-    service.search("index=* qid=n38H08hb016055")
+    service.search("index=* qid=n38H08hb0160556")
     service.results(print_results=True)
+    service.write_results(Event="GK Event Testing RAWs")
