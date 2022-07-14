@@ -18,3 +18,7 @@ class API_Methods(ABC):
     @abstractmethod
     def results(self):
         pass
+
+    @abstractmethod
+    def write_results(self):
+        pass

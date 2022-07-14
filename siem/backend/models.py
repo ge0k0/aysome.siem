@@ -11,6 +11,7 @@ class UCR(models.Model):
     description = models.CharField(max_length=256, default="New use case rule", null=True, blank=True)
     author = models.CharField(max_length=256, default="AYSOME IT Security", null=True, blank=True)
     group = models.ForeignKey(Group, on_delete=models.CASCADE)
+    cron = models.CharField(max_length=256, default="30 * * * *")
     search_terms = models.CharField(max_length=256, null=True, blank=True)
     search_query = models.TextField()
 
