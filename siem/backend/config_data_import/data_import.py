@@ -35,15 +35,15 @@ class Data_Import:
 
     def __import_ucr_into_db(self):
         # Check if the Group exists, since Group dependency is mandatory
-        if Group.objects.filter(Exists(Group.objects.get(title=self.yaml_object["group"]))):
-            self.groupObj = Group.objects.get(title=self.yaml_object["group"])
-        else:
+        self.groupObj = Group.objects.filter(Exists(Group.objects.filter(title=self.yaml_object["group"])))
+        if self.groupObj.count() == 0:
             self.__import_group_into_db(self.filename)
-            self.groupObj = Group.objects.get(title=self.yaml_object["group"])
+
+        self.groupObj = Group.objects.get(title=self.yaml_object["group"])
+        self.yaml_object["group"] = self.groupObj
         
         # Use update_or_create() method, since Object might already exist
         if hasattr(self, 'groupObj'):
-            self.yaml_object["group"] = self.groupObj
             UCR.objects.update_or_create(**self.yaml_object)
         else:
             pass
