@@ -7,7 +7,7 @@ class Group(models.Model):
     sourcetype = models.CharField(max_length=64)
 
 class UCR(models.Model):
-    title = models.CharField(max_length=256)
+    title = models.CharField(max_length=256, primary_key=True)
     description = models.CharField(max_length=256, default="New use case rule", null=True, blank=True)
     author = models.CharField(max_length=256, default="AYSOME IT Security", null=True, blank=True)
     group = models.ForeignKey(Group, on_delete=models.CASCADE)
