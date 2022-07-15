@@ -1,0 +1,10 @@
+# Hello World!
+
+title: One
+description: Antivirus Group Enrichment
+author: AYSOME IT Security
+required_fields: av_index
+group: 
+  - AV
+  - AVV
+search_query: '''index="main" sourcetype="enrichments"'''
