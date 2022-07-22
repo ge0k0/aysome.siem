@@ -14,7 +14,7 @@ class API_Methods(ABC):
         pass
 
     @abstractmethod
-    def search(self, string):
+    def create_search_job(self, string):
         pass
 
     @abstractmethod
