@@ -1,5 +1,6 @@
 # PATH_DIR is important for a proper DAGs import into Apache Airflow
 import sys
+
 from dags_settings import * 
 sys.path.append(PATH_DIR)
 
@@ -21,6 +22,7 @@ from airflow.decorators import dag, task, task_group
 from airflow.operators.python import PythonOperator
 
 import importlib
+import itertools
 
 # PRIMARY_API is the key in api_settings.py file.
 # This function imnport standartized API connector for the whole application
@@ -53,7 +55,7 @@ def ucrs_for_current_run():
     return search_queries        
 
 
-def search_data(search_query, title):
+def search_data(search_query, title, **kwargs):
     '''
     Function to search for notables. Results are returned to the API into the results index.
     '''
@@ -65,15 +67,16 @@ def search_data(search_query, title):
         sleep(1)
 
     service.results()
-    service.add_id_to_results(alarm_name=title)
+    service.add_id_to_results(**kwargs)
     service.dict_to_event()
-    service.write_results()
+    
+    service.write_results(source=title)
     return service.ids
 
 
 @dag(
     schedule_interval="0 0 * * *",
-    start_date=pendulum.datetime(2021, 1, 1, tz="UTC"),
+    start_date=pendulum.datetime(2022, 1, 1, tz="UTC"),
     catchup=False,
     dagrun_timeout=timedelta(minutes=60),
 )
@@ -87,21 +90,28 @@ def UCR_Notables_Run():
     @task(task_id="Search_Notables")
     def search_for_notables(search_queries):
         title, query = search_queries
-        ids = search_data(query, title)
+        ids = search_data(query, title=title, alarm_title=title, alarm_status="Pending")
         return ids
 
     @task(task_id="Enrich_Notables")
-    def enrich_current_notables():
-        pass
+    def enrich_current_notables(**kwargs):
+        ids = kwargs["ti"].xcom_pull(task_ids=['Search_Notables'])
+        # Multiple lists of lists to simple list 
+        ids = list(itertools.chain(*ids))
+        enrichments = Enrichment.objects.all()
+        for enrichment in enrichments:
+            for id in ids:
+                search_query = ''.join(("index=", SPLUNK_RESULTS_INDEX, ' sourcetype=', SPLUNK_RESULTS_SOURCETYPE, ' id=', id, ' source!=', enrichment.title))
+                search_data(search_query, id=id, title=enrichment.title)
 
     @task(task_id="Correlate_Notables")
     def correlate_current_notables():
         pass
 
-    @task(task_id="Create_Alarms_from_Notables")
-    def create_alarms_from_notables():
-        pass
+#    @task(task_id="Create_Alarms_from_Notables")
+#    def create_alarms_from_notables():
+#        pass
 
-    search_for_notables.expand(search_queries=call_for_current_ucrs()) >> enrich_current_notables() >> correlate_current_notables() >> create_alarms_from_notables() 
+    search_for_notables.expand(search_queries=call_for_current_ucrs()) >> enrich_current_notables() >> correlate_current_notables() # >> create_alarms_from_notables() 
 
 dag = UCR_Notables_Run()

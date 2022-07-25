@@ -94,16 +94,16 @@ class API(API_Methods):
 
     def add_id_to_results(self, **kwargs):
         self.ids = []
-        self.keys = []
+        self.keys = set()
         for result_item in self.results_dict_list:
-            id = str(randrange(1000000000, 9999999999))
-            self.ids.append(id)
-            id = ''.join(("id=", id))
-            result_item["id"] = id
+            if "id" not in kwargs.keys():
+                id = str(randrange(1000000000, 9999999999))
+                self.ids.append(id)
+                result_item["id"] = id
             for key, value in kwargs.items():
-                field = f'{key}={value}'
+                field = f'{value}'
                 result_item[key] = field
-                self.keys.append(key)
+                self.keys.add(key)
         return self.results_dict_list
 
     def dict_to_event(self):
@@ -112,9 +112,9 @@ class API(API_Methods):
         timestamp = timestamp.strftime('%Y-%m-%dT%H:%M:%S.000+00:00')
         for result_item in self.results_dict_list:
             if "_raw" in result_item:
-                event_string = ''.join((result_item["id"], ' _time=', timestamp, ' Event="', result_item["_raw"], '" '))
+                event_string = ''.join(('id=', result_item["id"], ' _time=', timestamp, ' Event="', result_item["_raw"], '"'))
                 for key in self.keys:
-                    ''.join((event_string, ' ', key, '=', result_item[key]))
+                    event_string = ''.join((event_string, ' ', key, '=', result_item[key]))
                 self.result_event_list.append(event_string)
                 continue
             self.result_event_list.append(str(result_item)) 
@@ -144,6 +144,12 @@ class API(API_Methods):
 if __name__ == "__main__":
     service=API()
     service.login()
-    service.search("index=* qid=n38H08hb016055")
-    service.results(print_results=True)
-    service.write_results(Event="GK Event Testing RAWs")
+    service.results_dict_list = [{1:1},{"_raw":"Hello Wolrd", 2:2}]
+    service.add_id_to_results(title="hello")
+    print(service.results_dict_list)
+    service.dict_to_event()
+    print(service.result_event_list)
+    print(service.ids)
+#    service.search("index=* qid=n38H08hb016055")
+#    service.results(print_results=True)
+#    service.write_results(Event="GK Event Testing RAWs")
