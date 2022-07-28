@@ -1,0 +1,153 @@
+if __name__ == "__main__":
+    import os
+    import sys
+    sys.path.append(os.getcwd())
+
+from backend.api.api_methods import API_Methods
+from backend.api.api_settings import *
+import splunklib.client as client
+import splunklib.results as results
+import json
+from random import randrange
+from datetime import datetime
+
+# Splunk API use standard class API_Methods config saved in api_methods.py file
+# It is used to standartize API call funktions across different APIs
+# Every new API have to use API_Methods class mandatory
+class API(API_Methods):
+    def __init__(self):
+        super().__init__()
+
+    def login(self):
+        '''
+        Login to the Splunk API.
+        '''
+        self.service = client.connect(
+            host=SPLUNK_API_HOST, 
+            port=SPUNK_API_PORT, 
+            splunkToken=SPLUNK_API_TOKEN, 
+            autologin=SPLUNK_API_AUTOLOGIN, 
+            version=SPLUNK_API_VERSION, 
+            scheme=SPLUNK_API_SCHEME, 
+            app=SPLUNK_API_APP)
+        return self.service
+    
+    # Search the Query
+    def create_search_job(self, search_query, options_dict = {"output_mode": 'raw'}):
+        '''
+        Create a search job. Every search query has to start with "search" command.
+        '''
+        # Every search query has to start with "search" command
+        if search_query.startswith("search") == False:
+            search_query = "search " + search_query
+
+        self.service.search_job = self.service.jobs.create(search_query, **options_dict)
+        return self.service.search_job
+
+    def check_if_job_ready(self):
+        '''
+        Check if the job is finished.
+        '''
+        if hasattr(self.service, "search_job"):
+            return self.service.search_job.is_done()
+        else:
+            return False
+
+    # Return resutls
+    def results(self, print_results=False):
+        ''' 
+        Check for search results. Return a list of dictionaries with results (key:value) in it.
+        '''
+        byteObj = self.service.search_job.results(output_mode='json').readall()
+        utf_string = byteObj.decode('utf-8')
+        self.results_raw = json.loads(utf_string)
+        self.results_dict_list = self.results_raw['results']
+        self.results_number_of_results = len(self.results_raw['results'])
+
+        # Check if the number of results is 0
+        # If so, return ...
+        if self.results_number_of_results == 0:
+            self.results_number_of_results = 0
+            self.results_dict_list = []
+        else:            
+            self.results_fields_list = []
+            for field in self.results_raw['fields']:
+                self.results_fields_list.append(field['name'])
+
+            self.results_preview = self.results_raw['preview']
+            self.results_messages = self.results_raw['messages']
+            
+            
+            if print_results == True:
+                for item in self.results_dict_list:
+                    print(item)
+        return self.results_dict_list
+
+    def add_id_to_results(self, **kwargs):
+        self.ids = []
+        self.keys = set()
+        for result_item in self.results_dict_list:
+            if "id" not in kwargs.keys():
+                id = str(randrange(1000000000, 9999999999))
+                self.ids.append(id)
+                result_item["id"] = id
+            for key, value in kwargs.items():
+                field = f'{value}'
+                result_item[key] = field
+                self.keys.add(key)
+        return self.results_dict_list
+
+    def dict_to_event(self):
+        self.result_event_list = []
+        timestamp = datetime.now()
+        timestamp = timestamp.strftime('%Y-%m-%dT%H:%M:%S')
+        for result_item in self.results_dict_list:
+            if "_raw" in result_item:
+#                event_string = ''.join(('id=', result_item["id"], ' _time=', timestamp, ' Event="', result_item["_raw"], '"'))
+                event_string = ''.join(('id=', result_item["id"], ' ', result_item["_raw"]))
+                for key in self.keys:
+                    if key!="id":
+                        event_string = ''.join((event_string, ' ', key, '=', result_item[key]))
+                self.result_event_list.append(event_string)
+                continue
+            self.result_event_list.append(str(result_item)) 
+        return self.result_event_list 
+
+
+    def write_results(self, index=SPLUNK_RESULTS_INDEX, sourcetype=SPLUNK_RESULTS_SOURCETYPE, source="API", host="local", Event=""):
+        '''
+        Write results to Splunk index.
+        '''
+
+        if hasattr(self, "result_event_list") and Event == "":
+            Event = self.result_event_list
+
+        connection_index = self.service.indexes[index]
+        if isinstance(Event, list) and len(Event) > 0:
+            for event in Event:
+                event = bytes(event, 'utf-8')
+                connection_index.submit(event, sourcetype=sourcetype, host=host, source=source)
+        elif isinstance(Event, str) and len(Event) > 0:
+            Event = bytes(Event, 'utf-8')
+            connection_index = self.service.indexes[index]
+            connection_index.submit(Event, sourcetype=sourcetype, host=host, source=source)
+
+
+# Local testing
+if __name__ == "__main__":
+    from time import sleep
+    service=API()
+    service.login()
+#    service.results_dict_list = [{1:1},{"_raw":"Hello Wolrd", 2:2}]
+#    service.add_id_to_results(title="hello")
+#    print(service.results_dict_list)
+#    service.dict_to_event()
+#    print(service.result_event_list)
+#    print(service.ids)
+    service.create_search_job(search_query="index=* some_field=123123")
+
+    while service.check_if_job_ready() == False:
+        sleep(1)
+
+    service.results(print_results=True)
+#    service.write_results(Event="GK Event Testing RAWs")

@@ -10,7 +10,7 @@ class API_Methods(ABC):
         pass
 
     @abstractmethod
-    def login(self):
+    def login_to_api(self):
         pass
 
     @abstractmethod
@@ -18,9 +18,12 @@ class API_Methods(ABC):
         pass
 
     @abstractmethod
-    def results(self):
+    def copy_results_from_api(self):
         pass
 
     @abstractmethod
-    def write_results(self):
+    def paste_results_to_api(self):
+        pass
+
+    def add_fields_to_results(self):
         pass

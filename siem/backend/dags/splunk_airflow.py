@@ -16,13 +16,15 @@ from backend.models import *
 import pendulum
 from time import sleep
 from croniter import croniter
-from datetime import datetime, timezone, timedelta
-
-from airflow.decorators import dag, task, task_group
-from airflow.operators.python import PythonOperator
-
+from datetime import datetime, timedelta
+import pytz
 import importlib
 import itertools
+from string import Template
+
+# Airflow
+from airflow.decorators import dag, task
+
 
 # PRIMARY_API is the key in api_settings.py file.
 # This function imnport standartized API connector for the whole application
@@ -32,51 +34,77 @@ PRIMARY_API = importlib.import_module(api_string)
 
 def ucrs_for_current_run():
     # Update cron_netx_run for the next run
-    local_date = datetime.now(timezone.utc)
-    ucrs = UCR.objects.all()
-#    ucrs = UCR.objects.filter(cron_next_run__lt = local_date)
-#    for ucr in ucrs:
-#        cron_new_value = croniter(ucr.cron, local_date).get_next(datetime)
-#        ucr.cron_next_run = cron_new_value
-#        ucr.save()
+    tz = pytz.timezone(TIMEZONE)
+    local_date = datetime.now(tz)
+#    ucrs = UCR.objects.all()
+    ucrs = UCR.objects.filter(cron_next_run__lt = local_date)
+    ucr_info = dict()
+    for ucr in ucrs:
+        earliest_latests_timestamp = dict()
+        earliest_latests_timestamp['earliest'] = ucr.cron_previous_run.astimezone().strftime('%Y-%m-%dT%H:%M:%S')
+        earliest_latests_timestamp['latest'] = ucr.cron_next_run.astimezone().strftime('%Y-%m-%dT%H:%M:%S')
+        cron_new_value = croniter(ucr.cron, local_date).get_next(datetime)
+        ucr.cron_previous_run = ucr.cron_next_run
+        ucr.cron_next_run = cron_new_value
+        ucr.save()
+        ucr_info[ucr.title] = earliest_latests_timestamp
 
     # Create a search query
-    search_queries = {}
     for ucr in ucrs:
         group_search_prefix = ucr.group.search_query_prefix
-        # str to list. [1:-1] is used to remove leading and final "
         ucr_search_terms = ucr.search_terms[1:-1].split('", "')
         search_query = group_search_prefix
         for term in ucr_search_terms:
-            search_query = f'{search_query} TERM({term}) '
+            search_query = f'{search_query} TERM({term})'
+            search_query = search_query.replace('"', '\"')
+            search_query = search_query.replace("'", "\'")
     
-        search_queries[ucr.title] = search_query
-    
-    return search_queries        
+        ucr_info[ucr.title]['search_query'] = search_query
+    return ucr_info
+
+def enrichment_for_current_id(enrichment, a_ids):
+    # Primary search
+    primary_search = ''.join(("index=", SPLUNK_RESULTS_INDEX, ' sourcetype=ucr', ' a_id IN (', ", ".join(str(id) for id in a_ids), ')'))
+    enrichment_required_fields = enrichment.required_fields.split(', ')
+    for field in enrichment_required_fields:
+        primary_search = ''.join((primary_search, f' {field}=*'))
+    # Secondary map search
+    search_query = ''.join((primary_search, f' | map maxsearches=10000000000 search=" search {enrichment.search_query}" | eval a_id=$a_id$'))
+    search_query = search_query.replace('"', '\"')
+    search_query = search_query.replace("'", "\'")
+    return search_query
 
 
-def search_data(search_query, title, **kwargs):
+def search_data(search_query, earliest_time = "-1y", latest_time = "now", **kwargs):
     '''
     Function to search for notables. Results are returned to the API into the results index.
     '''
     service = PRIMARY_API.API()
-    service.login()
-    service.create_search_job(search_query=search_query)
+    service.login_to_api()
+    service.create_search_job(search_query, earliest_time=earliest_time, latest_time=latest_time)
 
     while service.check_if_job_ready() == False:
         sleep(1)
 
-    service.results()
-    service.add_id_to_results(**kwargs)
-    service.dict_to_event()
-    
-    service.write_results(source=title)
-    return service.ids
+    if kwargs.get('title') == None:
+        source = "API"
+    else:
+        source = kwargs.pop('title')
+
+    if kwargs.get('sourcetype') == None:
+        kwargs['sourcetype'] = "API"
+    else:
+        sourcetype = kwargs.pop('sourcetype')
+
+    service.copy_results_from_api(print_results=True)
+    service.add_fields_to_results(sourcetype=sourcetype, **kwargs)
+    service.paste_results_to_api(source=source, sourcetype=sourcetype)
+    return service.a_ids
 
 
 @dag(
-    schedule_interval="0 0 * * *",
-    start_date=pendulum.datetime(2022, 1, 1, tz="UTC"),
+    schedule_interval="*/1 * * * *",
+    start_date=pendulum.datetime(2022, 1, 1, tz=TIMEZONE),
     catchup=False,
     dagrun_timeout=timedelta(minutes=60),
 )
@@ -88,30 +116,38 @@ def UCR_Notables_Run():
         return search_queries
 
     @task(task_id="Search_Notables")
-    def search_for_notables(search_queries):
-        title, query = search_queries
-        ids = search_data(query, title=title, alarm_title=title, alarm_status="Pending")
-        return ids
+    def search_for_notables(ucr_info):
+        title, infos = ucr_info
+
+        a_ids = search_data(infos['search_query'], earliest_time=infos['earliest'], latest_time=infos['latest'], title=title, alarm_title=title, alarm_status="Pending", sourcetype="ucr")
+        return a_ids
 
     @task(task_id="Enrich_Notables")
     def enrich_current_notables(**kwargs):
-        ids = kwargs["ti"].xcom_pull(task_ids=['Search_Notables'])
+        a_ids = kwargs["ti"].xcom_pull(task_ids=['Search_Notables'])
         # Multiple lists of lists to simple list 
-        ids = list(itertools.chain(*ids))
+        a_ids = list(itertools.chain(*a_ids))
         enrichments = Enrichment.objects.all()
         for enrichment in enrichments:
-            for id in ids:
-                search_query = ''.join(("index=", SPLUNK_RESULTS_INDEX, ' sourcetype=', SPLUNK_RESULTS_SOURCETYPE, ' id=', id, ' source!=', enrichment.title))
-                search_data(search_query, id=id, title=enrichment.title)
+            search_query = enrichment_for_current_id(enrichment, a_ids)
+            search_data(search_query, title=enrichment.title, sourcetype="enrichment")
+        return a_ids
 
     @task(task_id="Correlate_Notables")
-    def correlate_current_notables():
-        pass
+    def correlate_current_notables(**kwargs):
+        a_ids = kwargs["ti"].xcom_pull(task_ids=['Enrich_Notables'])
+        # Multiple lists of lists to simple list 
+        a_ids = list(itertools.chain(*a_ids))
+        correlations = Correlation.objects.all()
+        for correlation in correlations:
+            search_query = enrichment_for_current_id(correlation, a_ids)
+            search_data(search_query, title=correlation.title, sourcetype="correlation")
+        return a_ids
 
 #    @task(task_id="Create_Alarms_from_Notables")
 #    def create_alarms_from_notables():
 #        pass
 
-    search_for_notables.expand(search_queries=call_for_current_ucrs()) >> enrich_current_notables() >> correlate_current_notables() # >> create_alarms_from_notables() 
+    search_for_notables.expand(ucr_info = call_for_current_ucrs()) >> enrich_current_notables() >> correlate_current_notables() # >> create_alarms_from_notables() 
 
 dag = UCR_Notables_Run()

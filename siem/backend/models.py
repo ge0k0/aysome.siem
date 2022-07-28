@@ -21,6 +21,7 @@ class UCR(models.Model):
     group = models.ForeignKey(Group, on_delete=models.CASCADE)
     cron = models.CharField(max_length=256, default="30 * * * *")
     cron_next_run = models.DateTimeField(default=timezone.now())
+    cron_previous_run = models.DateTimeField(default=timezone.now(), editable=False)
     search_terms = models.CharField(max_length=256, null=True, blank=True)
     search_query = models.TextField()
     threshhold = models.IntegerField(default=1)
@@ -52,6 +53,8 @@ class Correlation(models.Model):
     title = models.CharField(max_length=256, primary_key=True, unique=True)
     description = models.CharField(max_length=256, default="New correlation", null=True, blank=True)
     author = models.CharField(max_length=256, default="AYSOME IT Security", null=True, blank=True)
+    required_fields = models.CharField(max_length=256, null=True, blank=True)
+    search_query = models.TextField(null=True, blank=True)
 
     def __str__(self):
         return self.title

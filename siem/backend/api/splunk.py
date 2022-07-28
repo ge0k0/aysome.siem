@@ -8,7 +8,7 @@ from backend.api.api_settings import *
 import splunklib.client as client
 import splunklib.results as results
 import json
-from random import randrange
+from secrets import randbelow
 from datetime import datetime
 
 # Splunk API use standard class API_Methods config saved in api_methods.py file
@@ -18,7 +18,7 @@ class API(API_Methods):
     def __init__(self):
         super().__init__()
 
-    def login(self):
+    def login_to_api(self):
         '''
         Login to the Splunk API.
         '''
@@ -31,9 +31,10 @@ class API(API_Methods):
             scheme=SPLUNK_API_SCHEME, 
             app=SPLUNK_API_APP)
         return self.service
-    
+
+
     # Search the Query
-    def create_search_job(self, search_query, options_dict = {"output_mode": 'json'}):
+    def create_search_job(self, search_query, earliest_time = "-1y", latest_time = "now"):
         '''
         Create a search job. Every search query has to start with "search" command.
         '''
@@ -41,8 +42,9 @@ class API(API_Methods):
         if search_query.startswith("search") == False:
             search_query = "search " + search_query
 
-        self.service.search_job = self.service.jobs.create(search_query, **options_dict)
+        self.service.search_job = self.service.jobs.create(search_query, earliest_time=earliest_time, latest_time=latest_time)
         return self.service.search_job
+
 
     def check_if_job_ready(self):
         '''
@@ -53,103 +55,87 @@ class API(API_Methods):
         else:
             return False
 
+
     # Return resutls
-    def results(self, print_results=False):
+    def copy_results_from_api(self, print_results=False):
         ''' 
-        Check for search results. Return a list of dictionaries with results (key:value) in it.
+        Check for search results. Return a list of RAW events with results in it.
         '''
-        byteObj = self.service.search_job.results(output_mode='json').readall()
+        self.results_list = list()
+
+        byteObj = self.service.search_job.results(output_mode='raw').readall()
         utf_string = byteObj.decode('utf-8')
-        self.results_raw = json.loads(utf_string)
-        self.results_dict_list = self.results_raw['results']
-        self.results_number_of_results = len(self.results_raw['results'])
+        self.results_list = utf_string.split('\n')
+        self.results_number_of_results = len(self.results_list)
 
-        # Check if the number of results is 0
-        # If so, return ...
-        if self.results_number_of_results == 0:
-            self.results_number_of_results = 0
-            self.results_dict_list = []
-        else:            
-            self.results_fields_list = []
-            for field in self.results_raw['fields']:
-                self.results_fields_list.append(field['name'])
+        if print_results == True:
+            for item in self.results_list:
+                print(item)
+        return self.results_list
 
-            self.results_preview = self.results_raw['preview']
-            self.results_messages = self.results_raw['messages']
-            
-            
-            if print_results == True:
-                for item in self.results_dict_list:
-                    print(item)
-        return self.results_dict_list
 
-    # Write results back in Splunk
-    def write_results(self, index=SPLUNK_RESULTS_INDEX, sourcetype=SPLUNK_RESULTS_SOURCETYPE, source="API", host="local", Event=""):
-        if Event == "":
-            pass
-        else:
-            Event = bytes(Event, 'utf-8')
-            connection_index = self.service.indexes[index]
-            connection_index.submit(Event, sourcetype=sourcetype, host=host, source=source)
-
-    def add_id_to_results(self, **kwargs):
-        self.ids = []
+    def add_fields_to_results(self, sourcetype=None, **kwargs):
+        '''
+        Add additional information to search results. 
+        '''
+        self.a_ids = list()
         self.keys = set()
-        for result_item in self.results_dict_list:
-            if "id" not in kwargs.keys():
-                id = str(randrange(1000000000, 9999999999))
-                self.ids.append(id)
-                result_item["id"] = id
-            for key, value in kwargs.items():
-                field = f'{value}'
-                result_item[key] = field
-                self.keys.add(key)
-        return self.results_dict_list
+        results_list_copy = self.results_list.copy()
+        self.results_list = list()
 
-    def dict_to_event(self):
-        self.result_event_list = []
-        timestamp = datetime.now()
-        timestamp = timestamp.strftime('%Y-%m-%dT%H:%M:%S.000+00:00')
-        for result_item in self.results_dict_list:
-            if "_raw" in result_item:
-                event_string = ''.join(('id=', result_item["id"], ' _time=', timestamp, ' Event="', result_item["_raw"], '"'))
-                for key in self.keys:
-                    event_string = ''.join((event_string, ' ', key, '=', result_item[key]))
-                self.result_event_list.append(event_string)
-                continue
-            self.result_event_list.append(str(result_item)) 
-        return self.result_event_list 
+        add_id = False
 
+        if sourcetype == "ucr":
+            add_id = True
 
-    def write_results(self, index=SPLUNK_RESULTS_INDEX, sourcetype=SPLUNK_RESULTS_SOURCETYPE, source="API", host="local", Event=""):
+        for result_item in results_list_copy:
+            if len(result_item) > 0:
+
+                # Create an A_ID if there is none.
+                if add_id == True:
+                    a_id = str(100000000000 - randbelow(99999999999))
+                    self.a_ids.append(a_id)
+                    kwargs["a_id"] = a_id
+
+                for key, value in kwargs.items():
+                    result_item = ''.join((f'{key}={value} ', result_item))
+                    self.keys.add(key)
+
+                self.results_list.append(result_item)
+        return self.results_list
+
+    def paste_results_to_api(self, index=SPLUNK_RESULTS_INDEX, sourcetype=SPLUNK_RESULTS_SOURCETYPE, source="API", host="local", data=[]):
         '''
         Write results to Splunk index.
         '''
 
-        if hasattr(self, "result_event_list") and Event == "":
-            Event = self.result_event_list
+        if len(data) == 0:
+            data = self.results_list
 
         connection_index = self.service.indexes[index]
-        if isinstance(Event, list) and len(Event) > 0:
-            for event in Event:
-                event = bytes(event, 'utf-8')
-                connection_index.submit(event, sourcetype=sourcetype, host=host, source=source)
-        elif isinstance(Event, str) and len(Event) > 0:
-            Event = bytes(Event, 'utf-8')
-            connection_index = self.service.indexes[index]
-            connection_index.submit(Event, sourcetype=sourcetype, host=host, source=source)
-
+        if len(data) > 0 and type(data) == list:
+            for event in data:
+                if len(event) > 0:
+                    event = bytes(event, 'utf-8')
+                    connection_index.submit(event, sourcetype=sourcetype, host=host, source=source)
 
 # Local testing
 if __name__ == "__main__":
+    from time import sleep
     service=API()
-    service.login()
-    service.results_dict_list = [{1:1},{"_raw":"Hello Wolrd", 2:2}]
-    service.add_id_to_results(title="hello")
-    print(service.results_dict_list)
-    service.dict_to_event()
-    print(service.result_event_list)
-    print(service.ids)
-#    service.search("index=* qid=n38H08hb016055")
-#    service.results(print_results=True)
-#    service.write_results(Event="GK Event Testing RAWs")
+    service.login_to_api()
+#    service.results_dict_list = [{1:1},{"_raw":"Hello Wolrd", 2:2}]
+#    service.add_id_to_results(title="hello")
+#    print(service.results_dict_list)
+#    service.dict_to_event()
+#    print(service.result_event_list)
+#    print(service.ids)
+    service.create_search_job(search_query="index=_audit TERM(ta_1658926534)")
+
+    while service.check_if_job_ready() == False:
+        sleep(1)
+
+    service.copy_results_from_api(print_results=True)
+    service.add_fields_to_results(a_id="11000111000", hello="world", x=1, OTHER=123123 )
+    print(service.results_list)
+    service.paste_results_to_api()
