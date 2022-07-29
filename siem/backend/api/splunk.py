@@ -119,6 +119,11 @@ class API(API_Methods):
                     event = bytes(event, 'utf-8')
                     connection_index.submit(event, sourcetype=sourcetype, host=host, source=source)
 
+def add_escape_character_to_string(string):
+    string = string.replace('"', '\\"')
+    string = string.replace("'", "\\'")
+    return string
+
 # Local testing
 if __name__ == "__main__":
     from time import sleep

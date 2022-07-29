@@ -10,7 +10,7 @@ timestamp = datetime.now()
 timestamp = timestamp.strftime('%Y-%m-%dT%H:%M:%S')
 
 collect_query = [f'''
-message="hello world" some_field=123123 another_field="wie ist das, boss!!"
+message="hello world" some_field=123123 another_field="wie ist das, dudee :) !!"
 ''']
 
 

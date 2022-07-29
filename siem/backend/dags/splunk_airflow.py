@@ -56,8 +56,7 @@ def ucrs_for_current_run():
         search_query = group_search_prefix
         for term in ucr_search_terms:
             search_query = f'{search_query} TERM({term})'
-            search_query = search_query.replace('"', '\"')
-            search_query = search_query.replace("'", "\'")
+            search_query = PRIMARY_API.add_escape_character_to_string(search_query)
     
         ucr_info[ucr.title]['search_query'] = search_query
     return ucr_info
@@ -69,9 +68,8 @@ def enrichment_for_current_id(enrichment, a_ids):
     for field in enrichment_required_fields:
         primary_search = ''.join((primary_search, f' {field}=*'))
     # Secondary map search
-    search_query = ''.join((primary_search, f' | map maxsearches=10000000000 search=" search {enrichment.search_query}" | eval a_id=$a_id$'))
-    search_query = search_query.replace('"', '\"')
-    search_query = search_query.replace("'", "\'")
+    search_query = PRIMARY_API.add_escape_character_to_string(enrichment.search_query) 
+    search_query = ''.join((primary_search, f' | map maxsearches=10000000000 search=" search {search_query}" | eval a_id=$a_id$'))
     return search_query
 
 
@@ -108,7 +106,7 @@ def search_data(search_query, earliest_time = "-1y", latest_time = "now", **kwar
     catchup=False,
     dagrun_timeout=timedelta(minutes=60),
 )
-def UCR_Notables_Run():
+def UCR_CORE_WORKFLOW():
 
     @task(task_id="Django_Requests")
     def call_for_current_ucrs():
@@ -118,7 +116,6 @@ def UCR_Notables_Run():
     @task(task_id="Search_Notables")
     def search_for_notables(ucr_info):
         title, infos = ucr_info
-
         a_ids = search_data(infos['search_query'], earliest_time=infos['earliest'], latest_time=infos['latest'], title=title, alarm_title=title, alarm_status="Pending", sourcetype="ucr")
         return a_ids
 
@@ -127,10 +124,12 @@ def UCR_Notables_Run():
         a_ids = kwargs["ti"].xcom_pull(task_ids=['Search_Notables'])
         # Multiple lists of lists to simple list 
         a_ids = list(itertools.chain(*a_ids))
-        enrichments = Enrichment.objects.all()
-        for enrichment in enrichments:
-            search_query = enrichment_for_current_id(enrichment, a_ids)
-            search_data(search_query, title=enrichment.title, sourcetype="enrichment")
+        # No empty searches needed
+        if len(a_ids) > 0:
+            enrichments = Enrichment.objects.all()
+            for enrichment in enrichments:
+                search_query = enrichment_for_current_id(enrichment, a_ids)
+                search_data(search_query, title=enrichment.title, sourcetype="enrichment")
         return a_ids
 
     @task(task_id="Correlate_Notables")
@@ -138,10 +137,12 @@ def UCR_Notables_Run():
         a_ids = kwargs["ti"].xcom_pull(task_ids=['Enrich_Notables'])
         # Multiple lists of lists to simple list 
         a_ids = list(itertools.chain(*a_ids))
-        correlations = Correlation.objects.all()
-        for correlation in correlations:
-            search_query = enrichment_for_current_id(correlation, a_ids)
-            search_data(search_query, title=correlation.title, sourcetype="correlation")
+        # No empty searches needed
+        if len(a_ids) > 0:
+            correlations = Correlation.objects.all()
+            for correlation in correlations:
+                search_query = enrichment_for_current_id(correlation, a_ids)
+                search_data(search_query, title=correlation.title, sourcetype="correlation")
         return a_ids
 
 #    @task(task_id="Create_Alarms_from_Notables")
@@ -150,4 +151,4 @@ def UCR_Notables_Run():
 
     search_for_notables.expand(ucr_info = call_for_current_ucrs()) >> enrich_current_notables() >> correlate_current_notables() # >> create_alarms_from_notables() 
 
-dag = UCR_Notables_Run()
+dag = UCR_CORE_WORKFLOW()
