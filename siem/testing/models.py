@@ -9,7 +9,7 @@ class UCR_Testing(models.Model):
     sourcetype = models.CharField(max_length=256, default="api")
 
     variables = models.CharField(max_length=256, null=True, blank=True)
-    search_query = models.TextField()
+    testing_query = models.TextField()
     threshhold = models.IntegerField(default=1)
 
     def __str__(self):
