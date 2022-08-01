@@ -33,6 +33,7 @@ ALLOWED_HOSTS = []
 INSTALLED_APPS = [
     'backend',
     'frontend',
+    'testing',
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
